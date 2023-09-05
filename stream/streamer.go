@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/jszwec/csvutil"
 	"github.com/krolaw/zipstream"
-	"github.com/mkrou/geonames/csv"
+	"github.com/v3v3r3v/geonames/csv"
 	"io"
 )
 

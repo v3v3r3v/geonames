@@ -3,8 +3,8 @@ package geonames
 import (
 	"fmt"
 	"github.com/asaskevich/govalidator"
-	"github.com/mkrou/geonames/models"
 	. "github.com/smartystreets/goconvey/convey"
+	"github.com/v3v3r3v/geonames/models"
 	"testing"
 )
 
@@ -15,7 +15,8 @@ func validate(x interface{}) error {
 
 func integration(t *testing.T, kind string, f func(p Parser) error) {
 	Convey("Given a default parser", t, func() {
-		p := NewParser()
+		fetcher := NewFetcher(FetcherConfig{RemoteUrl: DownloadGeonamesOrgUrl})
+		p := Parser{Fetcher: fetcher, FetchSource: SourceHttp}
 
 		Convey(fmt.Sprintf("When %s are parsed", kind), func() {
 			err := f(p)

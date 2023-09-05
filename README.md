@@ -47,7 +47,7 @@
 ## Installation
 
 ```bash 
-$ go get github.com/mkrou/geonames
+$ go get github.com/v3v3r3v/geonames
 ```
 
 ## Quick start
@@ -59,8 +59,8 @@ package main
 
 import (
     "fmt"
-    "github.com/mkrou/geonames"
-    "github.com/mkrou/geonames/models"
+    "github.com/v3v3r3v/geonames"
+    "github.com/v3v3r3v/geonames/models"
     "log"
 )
 
@@ -85,8 +85,8 @@ package main
 
 import (
     "fmt"
-    "github.com/mkrou/geonames"
-    "github.com/mkrou/geonames/models"
+    "github.com/v3v3r3v/geonames"
+    "github.com/v3v3r3v/geonames/models"
     "log"
 )
 func main() {
@@ -109,8 +109,8 @@ package main
 
 import (
     "fmt"
-    "github.com/mkrou/geonames"
-    "github.com/mkrou/geonames/models"
+    "github.com/v3v3r3v/geonames"
+    "github.com/v3v3r3v/geonames/models"
     "log"
 )
 func main() {

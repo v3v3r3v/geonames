@@ -4,15 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jszwec/csvutil"
-	"github.com/mkrou/geonames/models"
-	"github.com/mkrou/geonames/stream"
+	"github.com/v3v3r3v/geonames/models"
+	"github.com/v3v3r3v/geonames/stream"
 	"io"
 	"net/http"
+	"os"
 )
 
-const Url = "https://download.geonames.org/export/dump/"
+const DownloadGeonamesOrgUrl = "https://download.geonames.org/export/dump/"
 
-//List of dump archives
+// List of dump archives
 const (
 	Cities500                   models.GeoNameFile     = "cities500.zip"
 	Cities1000                  models.GeoNameFile     = "cities1000.zip"
@@ -43,35 +44,99 @@ const (
 	Modifications               models.DumpFile        = "modifications-%s.txt"
 )
 
-type Parser func(file string) (io.ReadCloser, error)
-
-func NewParser() Parser {
-	return Parser(func(file string) (io.ReadCloser, error) {
-		url := Url + file
-		resp, err := http.Get(url)
-		if err != nil {
-			return nil, err
-		}
-
-		switch resp.StatusCode {
-		case 200:
-			return resp.Body, nil
-		case 404:
-			return nil, errors.New(fmt.Sprintf("Page %s does not exist", url))
-		default:
-			return nil, errors.New(fmt.Sprintf("Page %s returned unexpected code %d", url, resp.StatusCode))
-		}
-	})
+type FetcherConfig struct {
+	RemoteUrl string
+	LocalPath string
 }
 
-func (p Parser) handle(dump models.DumpFile, isHeadersEmpty bool, handler interface{}) error {
-	var err error
-	var headers = []string{}
+type Fetcher struct {
+	cfg FetcherConfig
+}
 
-	model, err := getArgument(handler)
+func NewFetcher(cfg FetcherConfig) Fetcher {
+	return Fetcher{
+		cfg: cfg,
+	}
+}
+
+type FetchSource string
+
+const (
+	SourceFs   = "fs"
+	SourceHttp = "http"
+)
+
+func (p Fetcher) FetchFile(source FetchSource, file models.DumpFile) (io.ReadCloser, error) {
+	switch source {
+	case SourceFs:
+		return p.fetchFs(file)
+	case SourceHttp:
+		return p.fetchHttp(file)
+	default:
+		return nil, errors.New(fmt.Sprintf("Unknown fetch source: %s", source))
+	}
+}
+
+func (p Fetcher) DumpToFile(file models.DumpFile) error {
+	reader, err := p.fetchHttp(file)
+
 	if err != nil {
 		return err
 	}
+
+	defer reader.Close()
+
+	// Create or open a file for writing
+	fsFile, err := os.Create(p.cfg.LocalPath + file.String())
+	if err != nil {
+		return err
+	}
+	defer fsFile.Close()
+
+	// Copy the response body to the file
+	_, err = io.Copy(fsFile, reader)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p Fetcher) fetchFs(file models.DumpFile) (io.ReadCloser, error) {
+	fsFile, err := os.Open(p.cfg.LocalPath + file.String())
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(fsFile), nil
+}
+
+func (p Fetcher) fetchHttp(file models.DumpFile) (io.ReadCloser, error) {
+	url := p.cfg.RemoteUrl + file.String()
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Http Get %s error: %s", url, err))
+	}
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return resp.Body, nil
+	case http.StatusNotFound:
+		return nil, errors.New(fmt.Sprintf("Page %s does not exist", url))
+	default:
+		return nil, errors.New(fmt.Sprintf("Page %s returned unexpected code %d", url, resp.StatusCode))
+	}
+}
+
+type Parser struct {
+	FetchSource FetchSource
+	Fetcher     Fetcher
+}
+
+func handle[T any](p Parser, dump models.DumpFile, isHeadersEmpty bool, handler func(*T) error) error {
+	var err error
+	var headers = []string{}
+
+	model := new(T)
 
 	if isHeadersEmpty {
 		headers, err = csvutil.Header(model, "csv")
@@ -80,12 +145,18 @@ func (p Parser) handle(dump models.DumpFile, isHeadersEmpty bool, handler interf
 		}
 	}
 
-	r, err := p(dump.String())
+	r, err := p.Fetcher.FetchFile(p.FetchSource, dump)
 	if err != nil {
 		return err
 	}
+
 	f := func(parse func(v interface{}) error) error {
-		return fillArgument(handler, parse)
+		v := new(T)
+		err = parse(v)
+		if err != nil {
+			return err
+		}
+		return handler(v)
 	}
 
 	if dump.IsArchive() {
@@ -98,65 +169,65 @@ func (p Parser) handle(dump models.DumpFile, isHeadersEmpty bool, handler interf
 }
 
 func (p Parser) GetGeonames(archive models.GeoNameFile, handler func(*models.Geoname) error) error {
-	return p.handle(models.DumpFile(archive), true, handler)
+	return handle(p, archive.DumpFile(), true, handler)
 }
 
 func (p Parser) GetAlternateNames(archive models.AltNameFile, handler func(*models.AlternateName) error) error {
-	return p.handle(models.DumpFile(archive), true, handler)
+	return handle(p, archive.DumpFile(), true, handler)
 }
 
 func (p Parser) GetLanguages(handler func(*models.Language) error) error {
-	return p.handle(LangCodes, false, handler)
+	return handle(p, LangCodes, false, handler)
 }
 
 func (p Parser) GetTimeZones(handler func(*models.TimeZone) error) error {
-	return p.handle(TimeZones, false, handler)
+	return handle(p, TimeZones, false, handler)
 }
 
 func (p Parser) GetCountries(handler func(*models.Country) error) error {
-	return p.handle(Countries, true, handler)
+	return handle(p, Countries, true, handler)
 }
 
 func (p Parser) GetFeatureCodes(file models.FeatureCodeFile, handler func(*models.FeatureCode) error) error {
-	return p.handle(models.DumpFile(file), true, handler)
+	return handle(p, models.DumpFile(file), true, handler)
 }
 
 func (p Parser) GetHierarchy(handler func(*models.Hierarchy) error) error {
-	return p.handle(Hierarchy, true, handler)
+	return handle(p, Hierarchy, true, handler)
 }
 
 func (p Parser) GetShapes(handler func(*models.Shape) error) error {
-	return p.handle(Shapes, false, handler)
+	return handle(p, Shapes, false, handler)
 }
 
 func (p Parser) GetUserTags(handler func(*models.UserTag) error) error {
-	return p.handle(UserTags, true, handler)
+	return handle(p, UserTags, true, handler)
 }
 
 func (p Parser) GetAdminDivisions(handler func(*models.AdminDivision) error) error {
-	return p.handle(AdminDivisions, true, handler)
+	return handle(p, AdminDivisions, true, handler)
 }
 
 func (p Parser) GetAdminSubdivisions(handler func(*models.AdminSubdivision) error) error {
-	return p.handle(AdminSubDivisions, true, handler)
+	return handle(p, AdminSubDivisions, true, handler)
 }
 
 func (p Parser) GetAdminCodes5(handler func(*models.AdminCode5) error) error {
-	return p.handle(AdminCode5, true, handler)
+	return handle(p, AdminCode5, true, handler)
 }
 
 func (p Parser) GetAlternateNameDeletes(handler func(*models.AlternateNameDelete) error) error {
-	return p.handle(AlternateNamesDeletes.WithLastDate(), true, handler)
+	return handle(p, AlternateNamesDeletes.WithLastDate(), true, handler)
 }
 
 func (p Parser) GetAlternateNameModifications(handler func(*models.AlternateNameModification) error) error {
-	return p.handle(AlternateNamesModifications.WithLastDate(), true, handler)
+	return handle(p, AlternateNamesModifications.WithLastDate(), true, handler)
 }
 
 func (p Parser) GetDeletes(handler func(*models.GeonameDelete) error) error {
-	return p.handle(Deletes.WithLastDate(), true, handler)
+	return handle(p, Deletes.WithLastDate(), true, handler)
 }
 
 func (p Parser) GetModifications(handler func(*models.Geoname) error) error {
-	return p.handle(Modifications.WithLastDate(), true, handler)
+	return handle(p, Modifications.WithLastDate(), true, handler)
 }

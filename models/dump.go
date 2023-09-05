@@ -35,3 +35,15 @@ func (d DumpFile) WithLastDate() DumpFile {
 	t := time.Now().In(loc).AddDate(0, 0, -1)
 	return DumpFile(fmt.Sprintf(d.String(), t.Format("2006-01-02")))
 }
+
+func (d GeoNameFile) DumpFile() DumpFile {
+	return DumpFile(d)
+}
+
+func (d AltNameFile) DumpFile() DumpFile {
+	return DumpFile(d)
+}
+
+func (d FeatureCodeFile) DumpFile() DumpFile {
+	return DumpFile(d)
+}
